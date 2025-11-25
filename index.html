@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Data Visualization</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        #container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        #upload-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f0f8ff;
+            border-radius: 8px;
+            border: 2px dashed #3498db;
+            text-align: center;
+        }
+        #file-input {
+            margin: 10px 0;
+        }
+        .upload-btn {
+            background: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .upload-btn:hover {
+            background: #2980b9;
+        }
+        .status-message {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .success {
+            color: #27ae60;
+        }
+        .error {
+            color: #e74c3c;
+        }
+        .info {
+            color: #3498db;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        .chart-container {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        #scatterplot {
+            flex: 1;
+        }
+        #details {
+            width: 350px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+        }
+        #details h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .detail-item {
+            margin: 10px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #555;
+        }
+        .axis-label {
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .legend {
+            font-size: 12px;
+        }
+        circle {
+            transition: all 0.2s;
+        }
+        circle:hover {
+            stroke: #333;
+            stroke-width: 2px;
+        }
+        circle.selected {
+            stroke: #000;
+            stroke-width: 3px;
+        }
+        .placeholder {
+            color: #999;
+            font-style: italic;
+        }
+        #visualization {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Interactive Car Data Visualization</h1>
+        <p class="subtitle">Upload a CSV file with car data to visualize: Retail Price (x), Horsepower (y), Engine Size (size), Type (color)</p>
+        
+        <!-- File Upload Section -->
+        <div id="upload-section">
+            <h3>Upload Your Car Dataset (CSV)</h3>
+            <p>CSV format: Name, Type, AWD, RWD, Retail Price, Dealer Cost, Engine Size (l), Cyl, Horsepower(HP), City Miles Per Gallon</p>
+            <input type="file" id="file-input" accept=".csv" />
+            <div id="status-message" class="status-message"></div>
+            <div id="debug-info" class="info"></div>
+        </div>
+
+        <div id="visualization">
+            <div class="chart-container">
+                <div id="scatterplot"></div>
+                <div id="details">
+                    <h3>Car Details</h3>
+                    <p class="placeholder">Click on a point to see details and starplot visualization</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let carData = [];
+
+        // File upload handler
+        document.getElementById('file-input').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const statusMsg = document.getElementById('status-message');
+            const debugInfo = document.getElementById('debug-info');
+            statusMsg.textContent = 'Loading CSV...';
+            statusMsg.className = 'status-message';
+            debugInfo.textContent = '';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const csv = e.target.result;
+                    parseCSV(csv);
+                    
+                    if (carData.length === 0) {
+                        throw new Error('No valid car data found. Please check your CSV format.');
+                    }
+                    
+                    statusMsg.textContent = `✓ Successfully loaded ${carData.length} cars!`;
+                    statusMsg.className = 'status-message success';
+                    
+                    // Show visualization
+                    document.getElementById('visualization').style.display = 'block';
+                    createVisualization();
+                } catch (error) {
+                    statusMsg.textContent = `✗ Error: ${error.message}`;
+                    statusMsg.className = 'status-message error';
+                    console.error('Full error:', error);
+                }
+            };
+            reader.onerror = function() {
+                statusMsg.textContent = '✗ Error reading file';
+                statusMsg.className = 'status-message error';
+            };
+            reader.readAsText(file);
+        });
+
+        // Improved CSV Parser using D3's built-in parser
+        function parseCSV(csvText) {
+            // Use D3's CSV parser which handles quotes and commas correctly
+            const parsed = d3.csvParse(csvText);
+            
+            if (!parsed || parsed.length === 0) {
+                throw new Error('CSV file is empty or invalid');
+            }
+
+            // Debug: show first row columns
+            const debugInfo = document.getElementById('debug-info');
+            debugInfo.textContent = `Found columns: ${Object.keys(parsed[0]).join(', ')}`;
+
+            carData = [];
+            
+            parsed.forEach((row, index) => {
+                try {
+                    // Flexible column mapping - try different possible names
+                    const name = row['Name'] || row['name'] || row['Model'] || `Car ${index + 1}`;
+                    const type = row['Type'] || row['type'] || row['Category'] || 'Sedan';
+                    
+                    // Parse numeric values, handling various formats
+                    const retailPrice = parseNumber(row['Retail Price'] || row['RetailPrice'] || row['retail_price'] || row['Price']);
+                    const horsepower = parseNumber(row['Horsepower(HP)'] || row['Horsepower'] || row['horsepower'] || row['HP'] || row['hp']);
+                    const engineSize = parseNumber(row['Engine Size (l)'] || row['Engine Size'] || row['EngineSize'] || row['engine_size']);
+                    
+                    // Only add if we have the essential data for visualization
+                    if (retailPrice > 0 && horsepower > 0 && engineSize > 0) {
+                        const car = {
+                            name: name.trim(),
+                            type: type.trim(),
+                            awd: parseInt(row['AWD'] || row['awd'] || 0),
+                            rwd: parseInt(row['RWD'] || row['rwd'] || 0),
+                            retailPrice: retailPrice,
+                            dealerCost: parseNumber(row['Dealer Cost'] || row['DealerCost'] || row['dealer_cost']) || retailPrice * 0.9,
+                            engineSize: engineSize,
+                            cyl: parseInt(row['Cyl'] || row['cyl'] || row['Cylinders'] || 4),
+                            horsepower: horsepower,
+                            mpg: parseNumber(row['City Miles Per Gallon'] || row['MPG'] || row['mpg'] || row['City MPG']) || 20
+                        };
+                        carData.push(car);
+                    }
+                } catch (err) {
+                    console.warn(`Skipping row ${index + 1}:`, err.message);
+                }
+            });
+        }
+
+        // Helper function to parse numbers from various formats
+        function parseNumber(value) {
+            if (!value) return 0;
+            // Remove any non-numeric characters except decimal point and minus
+            const cleaned = String(value).replace(/[^0-9.-]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? 0 : num;
+        }
+
+        function createVisualization() {
+            // Clear any existing visualization
+            d3.select("#scatterplot").html("");
+            d3.select("#details").html("<h3>Car Details</h3><p class='placeholder'>Click on a point to see details</p>");
+
+            // Calculate dynamic domains from data
+            const prices = carData.map(d => d.retailPrice);
+            const horsepowers = carData.map(d => d.horsepower);
+            const engineSizes = carData.map(d => d.engineSize);
+            
+            const priceExtent = d3.extent(prices);
+            const hpExtent = d3.extent(horsepowers);
+            const engineExtent = d3.extent(engineSizes);
+
+            // Dimensions and margins
+            const margin = {top: 20, right: 140, bottom: 60, left: 80};
+            const width = 700 - margin.left - margin.right;
+            const height = 550 - margin.top - margin.bottom;
+
+            // Create SVG
+            const svg = d3.select("#scatterplot")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // Scales with padding
+            const xScale = d3.scaleLinear()
+                .domain([priceExtent[0] * 0.95, priceExtent[1] * 1.05])
+                .range([0, width]);
+
+            const yScale = d3.scaleLinear()
+                .domain([hpExtent[0] * 0.9, hpExtent[1] * 1.1])
+                .range([height, 0]);
+
+            // Size scale for engine size
+            const sizeScale = d3.scaleSqrt()
+                .domain(engineExtent)
+                .range([4, 15]);
+
+            // Color scale for car type - get unique types from data
+            const uniqueTypes = [...new Set(carData.map(d => d.type))];
+            const colorScale = d3.scaleOrdinal()
+                .domain(uniqueTypes)
+                .range(["#3498db", "#e74c3c", "#f39c12", "#2ecc71", "#9b59b6", "#1abc9c"]);
+
+            // Add X axis
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(xScale).tickFormat(d => "$" + d3.format(",")(d)))
+                .selectAll("text")
+                .style("font-size", "11px");
+
+            // Add Y axis
+            svg.append("g")
+                .call(d3.axisLeft(yScale))
+                .selectAll("text")
+                .style("font-size", "11px");
+
+            // X axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("x", width / 2)
+                .attr("y", height + 45)
+                .attr("text-anchor", "middle")
+                .text("Retail Price ($)");
+
+            // Y axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -height / 2)
+                .attr("y", -55)
+                .attr("text-anchor", "middle")
+                .text("Horsepower (HP)");
+
+            // Add legend
+            const legend = svg.append("g")
+                .attr("class", "legend")
+                .attr("transform", `translate(${width + 20}, 0)`);
+
+            // Type legend
+            legend.append("text")
+                .attr("y", -5)
+                .text("Car Type")
+                .style("font-size", "11px")
+                .style("font-weight", "bold");
+
+            uniqueTypes.forEach((type, i) => {
+                const legendRow = legend.append("g")
+                    .attr("transform", `translate(0, ${i * 22 + 10})`);
+
+                legendRow.append("circle")
+                    .attr("r", 6)
+                    .attr("fill", colorScale(type))
+                    .attr("opacity", 0.7);
+
+                legendRow.append("text")
+                    .attr("x", 15)
+                    .attr("y", 4)
+                    .text(type)
+                    .style("font-size", "11px");
+            });
+
+            // Add size legend
+            const legendY = uniqueTypes.length * 22 + 30;
+            legend.append("text")
+                .attr("y", legendY)
+                .text("Engine Size")
+                .style("font-size", "11px")
+                .style("font-weight", "bold");
+
+            const sampleSizes = [
+                Math.ceil(engineExtent[0]),
+                Math.ceil((engineExtent[0] + engineExtent[1]) / 2),
+                Math.floor(engineExtent[1])
+            ];
+
+            sampleSizes.forEach((size, i) => {
+                const row = legend.append("g")
+                    .attr("transform", `translate(0, ${legendY + 20 + i * 22})`);
+
+                row.append("circle")
+                    .attr("r", sizeScale(size))
+                    .attr("fill", "gray")
+                    .attr("opacity", 0.5);
+
+                row.append("text")
+                    .attr("x", 20)
+                    .attr("y", 4)
+                    .text(size + "L")
+                    .style("font-size", "11px");
+            });
+
+            // Add dots
+            const dots = svg.selectAll("circle.data-point")
+                .data(carData)
+                .enter()
+                .append("circle")
+                .attr("class", "data-point")
+                .attr("cx", d => xScale(d.retailPrice))
+                .attr("cy", d => yScale(d.horsepower))
+                .attr("r", d => sizeScale(d.engineSize))
+                .attr("fill", d => colorScale(d.type))
+                .attr("opacity", 0.7)
+                .style("cursor", "pointer")
+                .on("click", function(event, d) {
+                    dots.classed("selected", false);
+                    d3.select(this).classed("selected", true);
+                    updateDetails(d);
+                });
+
+            // Function to update details panel with starplot
+            function updateDetails(car) {
+                const detailsDiv = d3.select("#details");
+                detailsDiv.html("");
+
+                detailsDiv.append("h3").text("Car Details");
+
+                // Show 6 attributes as requested in assignment
+                const attributes = [
+                    {label: "Name", value: car.name},
+                    {label: "Type", value: car.type},
+                    {label: "AWD", value: car.awd ? "Yes" : "No"},
+                    {label: "RWD", value: car.rwd ? "Yes" : "No"},
+                    {label: "Retail Price", value: "$" + car.retailPrice.toLocaleString()},
+                    {label: "Dealer Cost", value: "$" + car.dealerCost.toLocaleString()}
+                ];
+
+                attributes.forEach(attr => {
+                    const item = detailsDiv.append("div").attr("class", "detail-item");
+                    item.append("span").attr("class", "detail-label").text(attr.label + ": ");
+                    item.append("span").text(attr.value);
+                });
+
+                // Bonus: Add starplot
+                detailsDiv.append("h3").text("Starplot Visualization").style("margin-top", "20px");
+                createStarplot(car, detailsDiv);
+            }
+
+            // Bonus: Starplot implementation (radar chart)
+            function createStarplot(car, container) {
+                const starSize = 150;
+                const starMargin = 20;
+
+                const starSvg = container.append("svg")
+                    .attr("width", starSize + starMargin * 2)
+                    .attr("height", starSize + starMargin * 2)
+                    .append("g")
+                    .attr("transform", `translate(${starSize/2 + starMargin}, ${starSize/2 + starMargin})`);
+
+                // Normalize values for starplot (0-1 scale) - 6 attributes
+                const starData = [
+                    {axis: "Price", value: (car.retailPrice - priceExtent[0]) / (priceExtent[1] - priceExtent[0])},
+                    {axis: "HP", value: (car.horsepower - hpExtent[0]) / (hpExtent[1] - hpExtent[0])},
+                    {axis: "Engine", value: (car.engineSize - engineExtent[0]) / (engineExtent[1] - engineExtent[0])},
+                    {axis: "MPG", value: car.mpg / 30},
+                    {axis: "Cyl", value: Math.min(1, (car.cyl - 4) / 4)},
+                    {axis: "Cost", value: (car.dealerCost - priceExtent[0] * 0.9) / (priceExtent[1] - priceExtent[0] * 0.9)}
+                ];
+
+                const numAxes = starData.length;
+                const angleSlice = Math.PI * 2 / numAxes;
+                const radius = starSize / 2 - 30;
+
+                // Draw circular grid
+                const levels = 3;
+                for (let i = 1; i <= levels; i++) {
+                    starSvg.append("circle")
+                        .attr("r", radius * i / levels)
+                        .attr("fill", "none")
+                        .attr("stroke", "#ddd")
+                        .attr("stroke-width", 1);
+                }
+
+                // Draw axis lines
+                starData.forEach((d, i) => {
+                    const angle = angleSlice * i - Math.PI / 2;
+                    const x = radius * Math.cos(angle);
+                    const y = radius * Math.sin(angle);
+
+                    starSvg.append("line")
+                        .attr("x1", 0)
+                        .attr("y1", 0)
+                        .attr("x2", x)
+                        .attr("y2", y)
+                        .attr("stroke", "#999")
+                        .attr("stroke-width", 1.5);
+
+                    // Axis labels
+                    const labelX = (radius + 20) * Math.cos(angle);
+                    const labelY = (radius + 20) * Math.sin(angle);
+                    
+                    starSvg.append("text")
+                        .attr("x", labelX)
+                        .attr("y", labelY)
+                        .attr("text-anchor", "middle")
+                        .attr("dominant-baseline", "middle")
+                        .style("font-size", "10px")
+                        .style("font-weight", "bold")
+                        .text(d.axis);
+                });
+
+                // Draw data polygon
+                const lineGenerator = d3.lineRadial()
+                    .angle((d, i) => angleSlice * i)
+                    .radius(d => Math.max(0, Math.min(1, d.value)) * radius)
+                    .curve(d3.curveLinearClosed);
+
+                starSvg.append("path")
+                    .datum(starData)
+                    .attr("d", lineGenerator)
+                    .attr("fill", colorScale(car.type))
+                    .attr("opacity", 0.5)
+                    .attr("stroke", colorScale(car.type))
+                    .attr("stroke-width", 2);
+
+                // Draw data points
+                starData.forEach((d, i) => {
+                    const angle = angleSlice * i - Math.PI / 2;
+                    const r = Math.max(0, Math.min(1, d.value)) * radius;
+                    const x = r * Math.cos(angle);
+                    const y = r * Math.sin(angle);
+
+                    starSvg.append("circle")
+                        .attr("cx", x)
+                        .attr("cy", y)
+                        .attr("r", 3)
+                        .attr("fill", colorScale(car.type))
+                        .attr("stroke", "white")
+                        .attr("stroke-width", 1);
+                });
+            }
+        }
+    </script>
+</body>
+</html>
